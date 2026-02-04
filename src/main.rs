@@ -58,13 +58,14 @@ async fn main() {
         manual_limiter: Arc::new(RateLimiter::new(60)), // 1 minute manual cooldown
     };
 
-    // Background Loop: 15 minutes = 900 seconds
+    // Background Loop: İlk 1 dakika sonra, sonra her 15 dakikada bir
     tokio::spawn(async move {
-        info!("Background Shroud Link aktif: Her 15 dakikada bir otomatik vahiy gelecek.");
+        info!("Background Shroud Link aktif: 1 dakika sonra ilk vahiy, sonra her 15 dakikada bir.");
+        sleep(Duration::from_secs(60)).await; // İlk bekleme: 1 dakika
         loop {
-            sleep(Duration::from_secs(900)).await;
             info!("Otomatik vahiy zamanı geldi...");
             let _ = service.perform_revelation().await;
+            sleep(Duration::from_secs(900)).await; // 15 dakika bekle
         }
     });
 

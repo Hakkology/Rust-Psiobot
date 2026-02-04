@@ -1,14 +1,20 @@
 # Build Stage
-FROM rust:1.81-alpine AS builder
+FROM rust:1.84-alpine AS builder
 
 # Install build dependencies
-RUN apk add --no-cache musl-dev gcc make pkgconfig openssl-dev
+RUN apk add --no-cache musl-dev gcc make pkgconfig openssl-dev openssl-libs-static
 
 WORKDIR /app
-COPY . .
 
-# Build the application
-RUN cargo build --release
+# Cache dependencies - bu layer sadece Cargo.toml değişirse rebuild olur
+COPY Cargo.toml Cargo.lock* ./
+RUN mkdir src && echo "fn main() {}" > src/main.rs
+RUN cargo build --release || true
+RUN rm -rf src
+
+# Asıl kaynak kodu kopyala ve derle
+COPY . .
+RUN touch src/main.rs && cargo build --release
 
 # Final Stage
 FROM alpine:3.19
