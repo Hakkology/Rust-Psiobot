@@ -1,0 +1,23 @@
+version: "3.9"
+
+services:
+  psiobot:
+    build: .
+    container_name: psiobot-hako
+    restart: always
+    env_file:
+      - .env
+    networks:
+      - edge
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.psiobot.rule=Host(`${DOMAIN:psiobot.com.tr}`)"
+      - "traefik.http.routers.psiobot.entrypoints=websecure"
+      - "traefik.http.routers.psiobot.tls.certresolver=le"
+      - "traefik.http.services.psiobot.loadbalancer.server.port=3000"
+
+networks:
+  edge:
+    external: true

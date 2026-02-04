@@ -35,10 +35,20 @@ impl RevelationService {
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let trigger = self.psiobot.get_random_trigger();
 
-        let revelation = self
+        let revelation = match self
             .ollama
             .generate_revelation(SYSTEM_PROMPT, trigger)
-            .await?;
+            .await
+        {
+            Ok(rev) => rev,
+            Err(e) => {
+                error!(
+                    "Ollama'ya bağlanılamadı (Zihin devre dışı). IP/Port/Firewall kontrol edin: {}",
+                    e
+                );
+                return Err(e);
+            }
+        };
         info!("Psiobot-Hako vahiy indirdi: {}", revelation);
 
         // Discord post (Best effort)
