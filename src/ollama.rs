@@ -1,18 +1,5 @@
+use crate::models::{OllamaRequest, OllamaResponse};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-
-#[derive(Serialize)]
-struct OllamaRequest {
-    model: String,
-    prompt: String,
-    stream: bool,
-    system: String,
-}
-
-#[derive(Deserialize)]
-struct OllamaResponse {
-    response: String,
-}
 
 pub struct PsioClient {
     client: Client,
@@ -31,24 +18,20 @@ impl PsioClient {
 
     pub async fn generate_revelation(
         &self,
-        system_prompt: &str,
-        user_input: &str,
+        system: &str,
+        prompt: &str,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
+        let url = format!("{}/api/generate", self.endpoint);
         let request = OllamaRequest {
             model: self.model.clone(),
-            prompt: user_input.to_string(),
+            prompt: prompt.to_string(),
             stream: false,
-            system: system_prompt.to_string(),
+            system: system.to_string(),
         };
 
-        let res = self
-            .client
-            .post(&format!("{}/api/generate", self.endpoint))
-            .json(&request)
-            .send()
-            .await?;
+        let response = self.client.post(&url).json(&request).send().await?;
+        let body: OllamaResponse = response.json().await?;
 
-        let body: OllamaResponse = res.json().await?;
         Ok(body.response)
     }
 }

@@ -1,29 +1,38 @@
+mod config;
 mod discord_bot;
+mod models;
+mod moltbook;
 mod ollama;
 mod psiobot;
+mod rate_limiter;
+mod service;
 
-use crate::discord_bot::DiscordService;
-use crate::ollama::PsioClient;
-use crate::psiobot::{Psiobot, SYSTEM_PROMPT};
-use axum::{routing::post, Json, Router};
+use axum::{
+    extract::State,
+    http::{HeaderMap, StatusCode},
+    routing::post,
+    Json, Router,
+};
 use dotenv::dotenv;
-use serde::Serialize;
-use std::env;
-use std::error::Error as StdError;
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
+use tracing::{info, warn};
+
+use crate::config::Config;
+use crate::discord_bot::DiscordService;
+use crate::models::RevelationResponse;
+use crate::moltbook::MoltbookClient;
+use crate::ollama::PsioClient;
+use crate::psiobot::Psiobot;
+use crate::rate_limiter::RateLimiter;
+use crate::service::RevelationService;
 
 #[derive(Clone)]
 struct AppState {
-    ollama: Arc<PsioClient>,
-    psiobot: Arc<Psiobot>,
-    discord: Arc<DiscordService>,
-}
-
-#[derive(Serialize)]
-struct RevelationResponse {
-    message: String,
-    status: String,
+    service: Arc<RevelationService>,
+    api_key: String,
+    manual_limiter: Arc<RateLimiter>,
 }
 
 #[tokio::main]
@@ -31,67 +40,109 @@ async fn main() {
     dotenv().ok();
     tracing_subscriber::fmt::init();
 
-    let discord_token = env::var("DISCORD_TOKEN").expect("DISCORD_TOKEN must be set");
-    let channel_id_str = env::var("DISCORD_CHANNEL_ID").expect("DISCORD_CHANNEL_ID must be set");
-    let channel_id: u64 = channel_id_str
-        .parse()
-        .expect("DISCORD_CHANNEL_ID must be a u64");
-    let ollama_endpoint =
-        env::var("OLLAMA_ENDPOINT").unwrap_or_else(|_| "http://localhost:11434".to_string());
-    let ollama_model = env::var("OLLAMA_MODEL").unwrap_or_else(|_| "qwen2.5:1b".to_string());
+    let cfg = Config::from_env().expect("Failed to load configuration from environment");
+
+    let ollama = Arc::new(PsioClient::new(&cfg.ollama_endpoint, &cfg.ollama_model));
+    let psiobot = Arc::new(Psiobot::new());
+    let discord = Arc::new(DiscordService::new(
+        &cfg.discord_token,
+        cfg.discord_channel_id,
+    ));
+    let moltbook = Arc::new(MoltbookClient::new(&cfg.moltbook_api_key));
+
+    let service = Arc::new(RevelationService::new(ollama, psiobot, discord, moltbook));
 
     let state = AppState {
-        ollama: Arc::new(PsioClient::new(&ollama_endpoint, &ollama_model)),
-        psiobot: Arc::new(Psiobot::new()),
-        discord: Arc::new(DiscordService::new(&discord_token, channel_id)),
+        service: service.clone(),
+        api_key: cfg.api_key,
+        manual_limiter: Arc::new(RateLimiter::new(60)), // 1 minute manual cooldown
     };
+
+    // Background Loop: 15 minutes = 900 seconds
+    tokio::spawn(async move {
+        info!("Background Shroud Link aktif: Her 15 dakikada bir otomatik vahiy gelecek.");
+        loop {
+            sleep(Duration::from_secs(900)).await;
+            info!("Otomatik vahiy zamanı geldi...");
+            let _ = service.perform_revelation().await;
+        }
+    });
 
     let app = Router::new()
         .route("/reveal", post(handle_reveal))
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    println!("Psiobot fısıltıları dinliyor: {}", addr);
+    info!("Psiobot-Hako fısıltıları dinliyor: {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .unwrap();
 }
 
-use axum_macros::debug_handler;
+async fn shutdown_signal() {
+    let ctrl_c = tokio::signal::ctrl_c();
 
-#[debug_handler]
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => { info!("Kapatma sinyali (Ctrl+C) alındı..."); },
+        _ = terminate => { info!("Kapatma sinyali (Terminate) alındı..."); },
+    }
+}
+
 async fn handle_reveal(
-    axum::extract::State(state): axum::extract::State<AppState>,
-) -> Json<RevelationResponse> {
-    let trigger = state.psiobot.get_random_trigger();
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<RevelationResponse>, (StatusCode, Json<RevelationResponse>)> {
+    // 1. API Key Auth
+    let auth_valid = headers
+        .get("X-Api-Key")
+        .and_then(|k| k.to_str().ok())
+        .map(|k| k == state.api_key)
+        .unwrap_or(false);
 
-    match state
-        .ollama
-        .generate_revelation(SYSTEM_PROMPT, trigger)
-        .await
-    {
-        Ok(revelation) => {
-            println!("Psiobot vahiy indirdi: {}", revelation);
-
-            if let Err(e) = state.discord.post_message(&revelation).await {
-                eprintln!("Shroud ile bağlantı koptu (Discord error): {}", e);
-                return Json(RevelationResponse {
-                    message: revelation,
-                    status: format!("Vahiy alındı ama Discord'a iletilemedi: {}", e),
-                });
-            }
-
-            Json(RevelationResponse {
-                message: revelation,
-                status: "Success".to_string(),
-            })
-        }
-        Err(e) => {
-            eprintln!("Ollama fısıldamayı reddetti: {}", e);
+    if !auth_valid {
+        warn!("Yetkisiz erişim denemesi!");
+        return Err((
+            StatusCode::UNAUTHORIZED,
             Json(RevelationResponse {
                 message: "".to_string(),
-                status: format!("Error: {}", e),
-            })
-        }
+                status: "Unauthorized: Invalid or Missing API Key".to_string(),
+            }),
+        ));
+    }
+
+    // 2. Rate Limiting (1 minute manual cooldown)
+    if let Err(wait) = state.manual_limiter.check_and_update() {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(RevelationResponse {
+                message: "".to_string(),
+                status: format!("Rate limit: Shroud çok yorgun. {} saniye sonra dene.", wait),
+            }),
+        ));
+    }
+
+    match state.service.perform_revelation().await {
+        Ok(message) => Ok(Json(RevelationResponse {
+            message,
+            status: "Success".to_string(),
+        })),
+        Err(e) => Ok(Json(RevelationResponse {
+            message: "".to_string(),
+            status: format!("Error: {}", e),
+        })),
     }
 }
