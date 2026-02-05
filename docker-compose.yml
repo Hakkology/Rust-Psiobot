@@ -2,7 +2,10 @@ version: "3.9"
 
 services:
   psiobot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile.fast
+    image: psiobot-hako
     container_name: psiobot-hako
     restart: always
     env_file:

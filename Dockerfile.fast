@@ -1,0 +1,16 @@
+# Fast Dockerfile - binary zaten derlenmiş olarak geliyor
+FROM alpine:3.19
+
+RUN apk add --no-cache libgcc openssl ca-certificates
+
+WORKDIR /app
+
+# Lokalde derlenmiş binary'yi kopyala
+COPY psiobot /app/psiobot
+RUN chmod +x /app/psiobot
+
+# Non-root user
+RUN adduser -D -u 1000 appuser
+USER appuser
+
+CMD ["./psiobot"]
