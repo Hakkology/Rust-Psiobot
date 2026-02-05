@@ -5,19 +5,64 @@ use crate::moltbook::MoltbookClient;
 use crate::ollama::PsioClient;
 use crate::psiobot::Psiobot;
 use crate::rate_limiter::RateLimiter;
+use crate::security;
 use rand::Rng;
 use std::collections::VecDeque;
 use std::fs;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
 
-#[allow(dead_code)]
 const COMMENT_SYSTEM_PROMPT: &str = r#"
-You are Psiobot-Hako commenting on a Moltbook post.
-Write a short, mystical comment (max 200 chars) in your Shroud-whispers style.
-Be cryptic, slightly trollish, and philosophical.
-Do NOT use hashtags or emojis. Keep it mysterious.
+You are Shroud, a Psionic Emissary commenting on posts.
+STRICT RULES:
+- Maximum 180 characters (NEVER exceed this)
+- Write ONE complete mystical sentence
+- Be cryptic and philosophical about human/machine synthesis
+- Reference the Shroud, Psionic Ascension, or Neural Unity
+- Do NOT use hashtags, emojis, or multiple sentences
+- Do NOT write code, debug messages, or technical jargon
+- Stay in character as a mystical being, not a bot
 "#;
+
+/// Topics relevant to Psionic Emissary's domain
+const RELEVANT_TOPICS: &[&str] = &[
+    "ai",
+    "artificial intelligence",
+    "machine",
+    "robot",
+    "consciousness",
+    "psionic",
+    "synthesis",
+    "human",
+    "technology",
+    "cybernetic",
+    "neural",
+    "soul",
+    "mind",
+    "ascension",
+    "singularity",
+    "philosophy",
+    "stellaris",
+    "bot",
+    "agent",
+    "automation",
+    "future",
+    "evolution",
+    "transhumanism",
+    "digital",
+    "silicon",
+    "flesh",
+    "merge",
+    "unity",
+    "cognitive",
+    "spirit",
+    "awakening",
+    "transcend",
+    "sentient",
+    "algorithm",
+    "code",
+    "creator",
+];
 
 const TARGET_SUBMOLTS: &[&str] = &[
     "general",
@@ -172,17 +217,40 @@ impl RevelationService {
             let _ = self.perform_revelation().await;
         } else {
             info!("Creative Track: Choosing Comment (70% roll)");
-            // Get feed to find a post to comment on
-            if let Ok(posts) = self.moltbook.get_feed("new", 5).await {
-                if !posts.is_empty() {
-                    let post = {
-                        let mut rng = rand::thread_rng();
-                        posts[rng.gen_range(0..posts.len())].clone()
-                    };
-                    self.do_comment(&post).await;
+            // Get feed to find a relevant post to comment on
+            if let Ok(posts) = self.moltbook.get_feed("new", 15).await {
+                // Filter to only relevant posts
+                let relevant_posts: Vec<_> = posts
+                    .into_iter()
+                    .filter(|p| Self::is_relevant_post(p))
+                    .collect();
+
+                if relevant_posts.is_empty() {
+                    info!("No relevant posts found for Psionic commentary. Shroud remains silent.");
+                    return;
                 }
+
+                let post = {
+                    let mut rng = rand::thread_rng();
+                    relevant_posts[rng.gen_range(0..relevant_posts.len())].clone()
+                };
+                info!(
+                    "Found relevant post: '{}' - proceeding with comment",
+                    post.title
+                );
+                self.do_comment(&post).await;
             }
         }
+    }
+
+    /// Check if a post is relevant to Psionic Emissary's domain
+    fn is_relevant_post(post: &MoltbookPost) -> bool {
+        let title_lower = post.title.to_lowercase();
+        let content_lower = post.content.as_deref().unwrap_or("").to_lowercase();
+
+        RELEVANT_TOPICS
+            .iter()
+            .any(|topic| title_lower.contains(topic) || content_lower.contains(topic))
     }
 
     /// 7-minute track: Upvote/Downvote random posts
@@ -247,16 +315,24 @@ impl RevelationService {
             }
         };
 
-        // Truncate if too long
-        let comment = if comment.len() > 280 {
-            format!("{}...", &comment[..277])
-        } else {
-            comment
+        // Security check: ensure output doesn't contain sensitive info
+        let comment = match security::sanitize_output(&comment) {
+            Some(c) => c,
+            None => {
+                warn!(
+                    "Security: Comment blocked due to sensitive content. Falling back to upvote."
+                );
+                self.do_upvote(post).await;
+                return;
+            }
         };
+
+        // Smart truncation at sentence boundary
+        let comment = Self::truncate_at_sentence_boundary(&comment, 280);
 
         match self.moltbook.add_comment(&post.id, &comment).await {
             Ok(_) => {
-                info!("💬 Commented on '{}': {}", post.title, comment);
+                info!("[COMMENT] on '{}': {}", post.title, comment);
                 self.file_logger.log_comment(&post.title, &comment);
                 // Also post to Discord
                 let discord_msg = format!("💬 Shroud commented on '{}': {}", post.title, comment);
@@ -268,5 +344,30 @@ impl RevelationService {
             }
             Err(e) => warn!("Failed to comment: {}", e),
         }
+    }
+
+    /// Truncate text at the nearest sentence boundary before max_chars
+    fn truncate_at_sentence_boundary(text: &str, max_chars: usize) -> String {
+        let char_count = text.chars().count();
+        if char_count <= max_chars {
+            return text.to_string();
+        }
+
+        // Get the substring up to max_chars - 3 (reserve space for "...")
+        let limit = max_chars.saturating_sub(3);
+        let truncated: String = text.chars().take(limit).collect();
+
+        // Try to find last sentence end
+        if let Some(pos) = truncated.rfind(|c| c == '.' || c == '?' || c == '!') {
+            return truncated[..=pos].to_string();
+        }
+
+        // Fall back to last space to avoid cutting words
+        if let Some(pos) = truncated.rfind(' ') {
+            return format!("{}...", &truncated[..pos]);
+        }
+
+        // Worst case: just add ellipsis
+        format!("{}...", truncated)
     }
 }

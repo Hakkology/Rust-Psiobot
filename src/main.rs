@@ -6,6 +6,7 @@ mod moltbook;
 mod ollama;
 mod psiobot;
 mod rate_limiter;
+mod security;
 mod service;
 
 use axum::{
