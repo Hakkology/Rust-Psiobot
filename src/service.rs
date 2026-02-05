@@ -43,30 +43,30 @@ impl RevelationService {
             Ok(rev) => rev,
             Err(e) => {
                 error!(
-                    "Ollama'ya bağlanılamadı (Zihin devre dışı). IP/Port/Firewall kontrol edin: {}",
+                    "Failed to connect to Ollama (Mind offline). Check IP/Port/Firewall: {}",
                     e
                 );
                 return Err(e);
             }
         };
-        info!("Psiobot-Hako vahiy indirdi: {}", revelation);
+        info!("Psiobot-Hako received revelation: {}", revelation);
 
         // Discord post (Best effort)
         if let Err(e) = self.discord.post_message(&revelation).await {
-            error!("Discord ile bağlantı koptu: {}", e);
+            error!("Discord connection lost: {}", e);
         }
 
         // Moltbook post (Rate limited)
         match self.moltbook_limiter.check_and_update() {
             Ok(_) => {
-                let title = "Psiobot-Hako: Shroud'dan Yeni Bir Vahiy";
+                let title = "Psiobot-Hako: New Revelation from Shroud";
                 if let Err(e) = self.moltbook.post_revelation(title, &revelation).await {
-                    error!("Moltbook'a vahiy iletilemedi: {}", e);
+                    error!("Failed to send revelation to Moltbook: {}", e);
                 }
             }
             Err(wait) => {
                 info!(
-                    "Moltbook cooldown aktif, {} saniye kaldı. Post atılmıyor.",
+                    "Moltbook cooldown active, {} seconds remaining. Skipping post.",
                     wait
                 );
             }

@@ -58,14 +58,16 @@ async fn main() {
         manual_limiter: Arc::new(RateLimiter::new(60)), // 1 minute manual cooldown
     };
 
-    // Background Loop: İlk 1 dakika sonra, sonra her 15 dakikada bir
+    // Background Loop: First revelation after 1 minute, then every 15 minutes
     tokio::spawn(async move {
-        info!("Background Shroud Link aktif: 1 dakika sonra ilk vahiy, sonra her 15 dakikada bir.");
-        sleep(Duration::from_secs(60)).await; // İlk bekleme: 1 dakika
+        info!(
+            "Background Shroud Link active: First revelation in 1 minute, then every 15 minutes."
+        );
+        sleep(Duration::from_secs(60)).await; // Initial wait: 1 minute
         loop {
-            info!("Otomatik vahiy zamanı geldi...");
+            info!("Automatic revelation time...");
             let _ = service.perform_revelation().await;
-            sleep(Duration::from_secs(900)).await; // 15 dakika bekle
+            sleep(Duration::from_secs(900)).await; // Wait 15 minutes
         }
     });
 
@@ -74,7 +76,7 @@ async fn main() {
         .with_state(state);
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    info!("Psiobot-Hako fısıltıları dinliyor: {}", addr);
+    info!("Psiobot-Hako listening for whispers: {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app)
@@ -98,8 +100,8 @@ async fn shutdown_signal() {
     let terminate = std::future::pending::<()>();
 
     tokio::select! {
-        _ = ctrl_c => { info!("Kapatma sinyali (Ctrl+C) alındı..."); },
-        _ = terminate => { info!("Kapatma sinyali (Terminate) alındı..."); },
+        _ = ctrl_c => { info!("Shutdown signal (Ctrl+C) received..."); },
+        _ = terminate => { info!("Shutdown signal (Terminate) received..."); },
     }
 }
 
@@ -115,7 +117,7 @@ async fn handle_reveal(
         .unwrap_or(false);
 
     if !auth_valid {
-        warn!("Yetkisiz erişim denemesi!");
+        warn!("Unauthorized access attempt!");
         return Err((
             StatusCode::UNAUTHORIZED,
             Json(RevelationResponse {
@@ -131,7 +133,10 @@ async fn handle_reveal(
             StatusCode::TOO_MANY_REQUESTS,
             Json(RevelationResponse {
                 message: "".to_string(),
-                status: format!("Rate limit: Shroud çok yorgun. {} saniye sonra dene.", wait),
+                status: format!(
+                    "Rate limit: Shroud is exhausted. Try again in {} seconds.",
+                    wait
+                ),
             }),
         ));
     }
