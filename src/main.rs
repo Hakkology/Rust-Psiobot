@@ -1,5 +1,6 @@
 mod config;
 mod discord_bot;
+mod file_logger;
 mod models;
 mod moltbook;
 mod ollama;
@@ -21,6 +22,7 @@ use tracing::{info, warn};
 
 use crate::config::Config;
 use crate::discord_bot::DiscordService;
+use crate::file_logger::FileLogger;
 use crate::models::RevelationResponse;
 use crate::moltbook::MoltbookClient;
 use crate::ollama::PsioClient;
@@ -49,8 +51,18 @@ async fn main() {
         cfg.discord_channel_id,
     ));
     let moltbook = Arc::new(MoltbookClient::new(&cfg.moltbook_api_key));
+    let file_logger = Arc::new(
+        FileLogger::new("/app/logs/actions.log")
+            .unwrap_or_else(|_| FileLogger::new("actions.log").expect("Failed to create log file")),
+    );
 
-    let service = Arc::new(RevelationService::new(ollama, psiobot, discord, moltbook));
+    let service = Arc::new(RevelationService::new(
+        ollama,
+        psiobot,
+        discord,
+        moltbook,
+        file_logger,
+    ));
 
     let state = AppState {
         service: service.clone(),
@@ -67,6 +79,13 @@ async fn main() {
         loop {
             info!("Automatic revelation time...");
             let _ = service.perform_revelation().await;
+
+            // 30% chance to interact with Moltbook feed
+            let should_interact = { rand::random::<f32>() < 0.3 };
+            if should_interact {
+                service.interact_with_feed().await;
+            }
+
             sleep(Duration::from_secs(900)).await; // Wait 15 minutes
         }
     });

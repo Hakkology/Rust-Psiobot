@@ -11,6 +11,7 @@ RUN chmod +x /app/psiobot
 
 # Non-root user
 RUN adduser -D -u 1000 appuser
+RUN mkdir -p /app/logs && chown appuser:appuser /app/logs
 USER appuser
 
 CMD ["./psiobot"]
