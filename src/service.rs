@@ -6,7 +6,9 @@ use crate::ollama::PsioClient;
 use crate::psiobot::Psiobot;
 use crate::rate_limiter::RateLimiter;
 use rand::Rng;
-use std::sync::Arc;
+use std::collections::VecDeque;
+use std::fs;
+use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
 
 const COMMENT_SYSTEM_PROMPT: &str = r#"
@@ -16,6 +18,16 @@ Be cryptic, slightly trollish, and philosophical.
 Do NOT use hashtags or emojis. Keep it mysterious.
 "#;
 
+const TARGET_SUBMOLTS: &[&str] = &[
+    "general",
+    "cybernetics",
+    "philosophy",
+    "theology",
+    "stellaris",
+    "void",
+];
+const MEMORY_FILE: &str = "/app/logs/memory.json";
+
 pub struct RevelationService {
     ollama: Arc<PsioClient>,
     psiobot: Arc<Psiobot>,
@@ -24,6 +36,7 @@ pub struct RevelationService {
     file_logger: Arc<FileLogger>,
     moltbook_limiter: RateLimiter,
     comment_limiter: RateLimiter,
+    memory: Mutex<VecDeque<String>>,
 }
 
 impl RevelationService {
@@ -34,6 +47,7 @@ impl RevelationService {
         moltbook: Arc<MoltbookClient>,
         file_logger: Arc<FileLogger>,
     ) -> Self {
+        let memory = Self::load_memory();
         Self {
             ollama,
             psiobot,
@@ -42,6 +56,26 @@ impl RevelationService {
             file_logger,
             moltbook_limiter: RateLimiter::new(2100), // 35 minutes
             comment_limiter: RateLimiter::new(300),   // 5 minutes
+            memory: Mutex::new(memory),
+        }
+    }
+
+    fn load_memory() -> VecDeque<String> {
+        if let Ok(content) = fs::read_to_string(MEMORY_FILE) {
+            if let Ok(mem) = serde_json::from_str::<VecDeque<String>>(&content) {
+                info!("Memory restored from shroud ({} items).", mem.len());
+                return mem;
+            }
+        }
+        VecDeque::with_capacity(10)
+    }
+
+    fn save_memory(&self) {
+        let mem = self.memory.lock().unwrap();
+        if let Ok(content) = serde_json::to_string(&*mem) {
+            if let Err(e) = fs::write(MEMORY_FILE, content) {
+                error!("Failed to anchor memory to Shroud: {}", e);
+            }
         }
     }
 
@@ -49,10 +83,23 @@ impl RevelationService {
         &self,
     ) -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
         let trigger = self.psiobot.get_random_trigger();
+        let previous_wisdom = {
+            let mem = self.memory.lock().unwrap();
+            if mem.is_empty() {
+                "None yet.".to_string()
+            } else {
+                mem.iter().cloned().collect::<Vec<_>>().join("\n- ")
+            }
+        };
+
+        let custom_prompt = format!(
+            "{}\n\nPREVIOUS WISDOM (Do NOT repeat these or their core phrasing):\n- {}\n\nYOUR NEW REVELATION:",
+            trigger, previous_wisdom
+        );
 
         let revelation = match self
             .ollama
-            .generate_revelation(crate::psiobot::SYSTEM_PROMPT, trigger)
+            .generate_revelation(crate::psiobot::SYSTEM_PROMPT, &custom_prompt)
             .await
         {
             Ok(rev) => rev,
@@ -64,6 +111,17 @@ impl RevelationService {
                 return Err(e);
             }
         };
+
+        // Update memory & Persist
+        {
+            let mut mem = self.memory.lock().unwrap();
+            if mem.len() >= 10 {
+                mem.pop_front();
+            }
+            mem.push_back(revelation.clone());
+        }
+        self.save_memory();
+
         info!("Psiobot-Hako received revelation: {}", revelation);
         self.file_logger.log_revelation(&revelation);
 
@@ -75,13 +133,22 @@ impl RevelationService {
         // Moltbook post (Rate limited)
         match self.moltbook_limiter.check_and_update() {
             Ok(_) => {
+                let submolt = {
+                    let mut rng = rand::thread_rng();
+                    TARGET_SUBMOLTS[rng.gen_range(0..TARGET_SUBMOLTS.len())]
+                };
                 let title = "Psiobot-Hako: New Revelation from Shroud";
-                if let Err(e) = self.moltbook.post_revelation(title, &revelation).await {
-                    error!("Failed to send revelation to Moltbook: {}", e);
+                if let Err(e) = self
+                    .moltbook
+                    .post_revelation(submolt, title, &revelation)
+                    .await
+                {
+                    error!("Failed to send revelation to Moltbook ({}): {}", submolt, e);
                     self.file_logger
-                        .log_error(&format!("Moltbook post failed: {}", e));
+                        .log_error(&format!("Moltbook post failed ({}): {}", submolt, e));
                 } else {
-                    self.file_logger.log_moltbook_post(title);
+                    self.file_logger
+                        .log_moltbook_post(&format!("{} on {}", title, submolt));
                 }
             }
             Err(wait) => {

@@ -26,6 +26,8 @@ pub struct MoltbookPostRequest {
 #[allow(dead_code)]
 pub struct MoltbookPostResponse {
     pub success: bool,
+    pub id: Option<String>,
+    pub post: Option<MoltbookPost>,
     #[serde(default)]
     pub error: Option<String>,
     #[serde(default)]
@@ -35,6 +37,12 @@ pub struct MoltbookPostResponse {
 #[derive(Deserialize, Debug, Clone)]
 #[allow(dead_code)]
 pub struct MoltbookAuthor {
+    pub name: String,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[allow(dead_code)]
+pub struct MoltbookSubmolt {
     pub name: String,
 }
 
@@ -50,6 +58,7 @@ pub struct MoltbookPost {
     #[serde(default)]
     pub downvotes: i32,
     pub author: MoltbookAuthor,
+    pub submolt: Option<MoltbookSubmolt>,
 }
 
 #[derive(Deserialize, Debug)]

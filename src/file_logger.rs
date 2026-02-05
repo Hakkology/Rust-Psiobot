@@ -20,6 +20,9 @@ impl FileLogger {
         let timestamp = Local::now().format("%Y-%m-%d %H:%M:%S");
         let line = format!("[{}] [{}] {}\n", timestamp, action, details);
 
+        // Mirror to stdout for Docker logs
+        print!("{}", line);
+
         if let Ok(mut file) = self.file.lock() {
             let _ = file.write_all(line.as_bytes());
             let _ = file.flush();

@@ -24,6 +24,7 @@ impl MoltbookClient {
 
     pub async fn post_revelation(
         &self,
+        submolt: &str,
         title: &str,
         content: &str,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
@@ -33,7 +34,7 @@ impl MoltbookClient {
 
         let url = format!("{}/posts", self.base_url);
         let request = MoltbookPostRequest {
-            submolt: "general".to_string(),
+            submolt: submolt.to_string(),
             title: title.to_string(),
             content: content.to_string(),
         };
@@ -47,26 +48,43 @@ impl MoltbookClient {
             .send()
             .await?;
 
-        if response.status().is_success() {
-            tracing::info!("Revelation successfully posted to Moltbook! 🦞");
-            Ok(())
-        } else {
-            let status = response.status();
-            let body: MoltbookPostResponse = response.json().await?;
-            let error_msg = body.error.unwrap_or_else(|| "Unknown error".to_string());
+        let status = response.status();
+        let body_text = response.text().await?;
 
-            if status.as_u16() == 429 {
-                let retry = body.retry_after_minutes.unwrap_or(30);
-                tracing::warn!(
-                    "Moltbook Rate Limit: Retry in {} minutes. Error: {}",
-                    retry,
-                    error_msg
+        if status.is_success() {
+            if let Ok(body) = serde_json::from_str::<MoltbookPostResponse>(&body_text) {
+                let post_id = body
+                    .id
+                    .or_else(|| body.post.as_ref().map(|p| p.id.clone()))
+                    .unwrap_or_else(|| "unknown".to_string());
+                tracing::info!(
+                    "Revelation successfully posted to Moltbook! ID: {} 🦞",
+                    post_id
                 );
             } else {
-                tracing::error!("Moltbook Error ({}): {}", status, error_msg);
+                tracing::info!(
+                    "Revelation successfully posted to Moltbook! (Response body: {}) 🦞",
+                    body_text
+                );
             }
+            Ok(())
+        } else {
+            tracing::error!("Moltbook API Error ({}) - Response: {}", status, body_text);
 
-            Err(format!("Moltbook API error: {} - {}", status, error_msg).into())
+            if let Ok(body) = serde_json::from_str::<MoltbookPostResponse>(&body_text) {
+                let error_msg = body.error.unwrap_or_else(|| "Unknown error".to_string());
+                if status.as_u16() == 429 {
+                    let retry = body.retry_after_minutes.unwrap_or(30);
+                    tracing::warn!(
+                        "Moltbook Rate Limit: Retry in {} minutes. Error: {}",
+                        retry,
+                        error_msg
+                    );
+                }
+                Err(format!("Moltbook API error: {} - {}", status, error_msg).into())
+            } else {
+                Err(format!("Moltbook API error: {} - {}", status, body_text).into())
+            }
         }
     }
 
