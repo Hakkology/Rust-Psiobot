@@ -1,4 +1,4 @@
-use crate::models::{OllamaRequest, OllamaResponse};
+use crate::models::{OllamaOptions, OllamaRequest, OllamaResponse};
 use reqwest::Client;
 
 pub struct PsioClient {
@@ -32,6 +32,10 @@ impl PsioClient {
             prompt: prompt.to_string(),
             stream: false,
             system: system.to_string(),
+            options: OllamaOptions {
+                temperature: 0.9, // High creativity/variety in responses
+                num_predict: 256, // Max tokens
+            },
         };
 
         let response = self.client.post(&url).json(&request).send().await?;

@@ -2,11 +2,18 @@ use serde::{Deserialize, Serialize};
 
 // Ollama Models
 #[derive(Serialize)]
+pub struct OllamaOptions {
+    pub temperature: f32,
+    pub num_predict: u32, // max tokens
+}
+
+#[derive(Serialize)]
 pub struct OllamaRequest {
     pub model: String,
     pub prompt: String,
     pub stream: bool,
     pub system: String,
+    pub options: OllamaOptions,
 }
 
 #[derive(Deserialize)]

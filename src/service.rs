@@ -151,20 +151,50 @@ impl RevelationService {
             trigger, previous_wisdom
         );
 
-        let revelation = match self
-            .ollama
-            .generate_revelation(crate::psiobot::SYSTEM_PROMPT, &custom_prompt)
-            .await
-        {
-            Ok(rev) => rev,
-            Err(e) => {
-                error!(
-                    "Failed to connect to Ollama (Mind offline). Check IP/Port/Firewall: {}",
-                    e
-                );
-                return Err(e);
+        // Try up to 3 times to get a unique revelation
+        let mut revelation = String::new();
+        for attempt in 0..3 {
+            revelation = match self
+                .ollama
+                .generate_revelation(crate::psiobot::SYSTEM_PROMPT, &custom_prompt)
+                .await
+            {
+                Ok(rev) => rev,
+                Err(e) => {
+                    error!(
+                        "Failed to connect to Ollama (Mind offline). Check IP/Port/Firewall: {}",
+                        e
+                    );
+                    return Err(e);
+                }
+            };
+
+            // Check if this revelation is too similar to any in memory
+            let is_duplicate = {
+                let mem = self.memory.lock().unwrap();
+                mem.iter().any(|prev| {
+                    // Exact match or very high similarity (first 50 chars match)
+                    prev == &revelation
+                        || (prev.len() >= 50
+                            && revelation.len() >= 50
+                            && prev.chars().take(50).collect::<String>()
+                                == revelation.chars().take(50).collect::<String>())
+                })
+            };
+
+            if !is_duplicate {
+                break; // Got a unique revelation
             }
-        };
+
+            if attempt < 2 {
+                info!(
+                    "Revelation too similar to previous, regenerating (attempt {}/3)...",
+                    attempt + 2
+                );
+            } else {
+                warn!("Could not generate unique revelation after 3 attempts, using last one");
+            }
+        }
 
         // Update memory & Persist
         {
@@ -256,27 +286,28 @@ impl RevelationService {
             let _ = self.perform_revelation().await;
         } else {
             info!("Creative Track: Choosing Comment (70% roll)");
-            // Get feed to find a relevant post to comment on
+            // Get feed to find a post to comment on
             if let Ok(posts) = self.moltbook.get_feed("new", 15).await {
-                // Filter to only relevant posts
-                let relevant_posts: Vec<_> = posts
-                    .into_iter()
-                    .filter(|p| Self::is_relevant_post(p))
-                    .collect();
-
-                if relevant_posts.is_empty() {
-                    info!("No relevant posts found for Psionic commentary. Shroud remains silent.");
+                if posts.is_empty() {
+                    info!("Feed is empty. Shroud remains silent.");
                     return;
                 }
 
-                let post = {
+                // Prefer relevant posts, but fall back to any post
+                let relevant_posts: Vec<_> =
+                    posts.iter().filter(|p| Self::is_relevant_post(p)).collect();
+
+                let post = if !relevant_posts.is_empty() {
                     let mut rng = rand::thread_rng();
                     relevant_posts[rng.gen_range(0..relevant_posts.len())].clone()
+                } else {
+                    // No relevant posts - pick any post
+                    info!("No relevant posts found, commenting on random post instead");
+                    let mut rng = rand::thread_rng();
+                    posts[rng.gen_range(0..posts.len())].clone()
                 };
-                info!(
-                    "Found relevant post: '{}' - proceeding with comment",
-                    post.title
-                );
+
+                info!("Found post: '{}' - proceeding with comment", post.title);
                 self.do_comment(&post).await;
             }
         }
