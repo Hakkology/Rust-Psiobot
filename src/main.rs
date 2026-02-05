@@ -70,23 +70,23 @@ async fn main() {
         manual_limiter: Arc::new(RateLimiter::new(60)), // 1 minute manual cooldown
     };
 
-    // Background Loop: First revelation after 1 minute, then every 15 minutes
+    // Track 1: Creative Actions (37 minutes) - 30% Revelation / 70% Comment
+    let creative_service = service.clone();
     tokio::spawn(async move {
-        info!(
-            "Background Shroud Link active: First revelation in 1 minute, then every 15 minutes."
-        );
-        sleep(Duration::from_secs(60)).await; // Initial wait: 1 minute
+        info!("Creative Track Active: 37-minute cycle (30% Post / 70% Comment).");
         loop {
-            info!("Automatic revelation time...");
-            let _ = service.perform_revelation().await;
+            creative_service.perform_creative_action().await;
+            sleep(Duration::from_secs(2220)).await; // 37 minutes
+        }
+    });
 
-            // 30% chance to interact with Moltbook feed
-            let should_interact = { rand::random::<f32>() < 0.3 };
-            if should_interact {
-                service.interact_with_feed().await;
-            }
-
-            sleep(Duration::from_secs(900)).await; // Wait 15 minutes
+    // Track 2: Passive Interactions (7 minutes) - Upvote / Downvote
+    let interaction_service = service.clone();
+    tokio::spawn(async move {
+        info!("Interaction Track Active: 7-minute cycle (Upvote / Downvote).");
+        loop {
+            interaction_service.perform_passive_interaction().await;
+            sleep(Duration::from_secs(420)).await; // 7 minutes
         }
     });
 

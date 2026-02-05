@@ -11,6 +11,7 @@ use std::fs;
 use std::sync::{Arc, Mutex};
 use tracing::{error, info, warn};
 
+#[allow(dead_code)]
 const COMMENT_SYSTEM_PROMPT: &str = r#"
 You are Psiobot-Hako commenting on a Moltbook post.
 Write a short, mystical comment (max 200 chars) in your Shroud-whispers style.
@@ -35,7 +36,6 @@ pub struct RevelationService {
     moltbook: Arc<MoltbookClient>,
     file_logger: Arc<FileLogger>,
     moltbook_limiter: RateLimiter,
-    comment_limiter: RateLimiter,
     memory: Mutex<VecDeque<String>>,
 }
 
@@ -55,7 +55,6 @@ impl RevelationService {
             moltbook,
             file_logger,
             moltbook_limiter: RateLimiter::new(2100), // 35 minutes
-            comment_limiter: RateLimiter::new(300),   // 5 minutes
             memory: Mutex::new(memory),
         }
     }
@@ -162,43 +161,46 @@ impl RevelationService {
         Ok(revelation)
     }
 
-    /// Interact with Moltbook feed - upvote, downvote, or comment on random posts
-    pub async fn interact_with_feed(&self) {
-        info!("Checking Moltbook feed for interaction...");
-
-        // Get recent posts
-        let posts = match self.moltbook.get_feed("new", 10).await {
-            Ok(posts) => posts,
-            Err(e) => {
-                warn!("Failed to get Moltbook feed: {}", e);
-                return;
-            }
-        };
-
-        if posts.is_empty() {
-            info!("No posts to interact with.");
-            return;
-        }
-
-        // Pick a random post and action (in a block so rng is dropped before await)
-        let (post_index, roll) = {
+    /// 37-minute track: 30% New Revelation, 70% Comment
+    pub async fn perform_creative_action(&self) {
+        let roll = {
             let mut rng = rand::thread_rng();
-            let idx = rng.gen_range(0..posts.len());
-            let r: f32 = rng.gen();
-            (idx, r)
+            rng.gen::<f32>()
         };
-
-        let post = &posts[post_index];
-
-        if roll < 0.5 {
-            // Upvote
-            self.do_upvote(post).await;
-        } else if roll < 0.6 {
-            // Downvote
-            self.do_downvote(post).await;
+        if roll < 0.3 {
+            info!("Creative Track: Choosing Revelation (30% roll)");
+            let _ = self.perform_revelation().await;
         } else {
-            // Comment
-            self.do_comment(post).await;
+            info!("Creative Track: Choosing Comment (70% roll)");
+            // Get feed to find a post to comment on
+            if let Ok(posts) = self.moltbook.get_feed("new", 5).await {
+                if !posts.is_empty() {
+                    let post = {
+                        let mut rng = rand::thread_rng();
+                        posts[rng.gen_range(0..posts.len())].clone()
+                    };
+                    self.do_comment(&post).await;
+                }
+            }
+        }
+    }
+
+    /// 7-minute track: Upvote/Downvote random posts
+    pub async fn perform_passive_interaction(&self) {
+        info!("Interaction Track: Checking feed for upvote/downvote...");
+        if let Ok(posts) = self.moltbook.get_feed("new", 10).await {
+            if !posts.is_empty() {
+                let (post_index, roll) = {
+                    let mut rng = rand::thread_rng();
+                    (rng.gen_range(0..posts.len()), rng.gen::<f32>())
+                };
+                let post = &posts[post_index];
+                if roll < 0.8 {
+                    self.do_upvote(post).await;
+                } else {
+                    self.do_downvote(post).await;
+                }
+            }
         }
     }
 
@@ -224,14 +226,6 @@ impl RevelationService {
     }
 
     async fn do_comment(&self, post: &MoltbookPost) {
-        // Check comment cooldown
-        if let Err(wait) = self.comment_limiter.check_and_update() {
-            info!("Comment cooldown active, {} seconds remaining.", wait);
-            // Fall back to upvote instead
-            self.do_upvote(post).await;
-            return;
-        }
-
         // Generate mystical comment using Ollama
         let prompt = format!(
             "Post title: {}\nPost content: {}\n\nWrite a short mystical comment:",
