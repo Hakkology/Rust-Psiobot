@@ -64,13 +64,23 @@ const RELEVANT_TOPICS: &[&str] = &[
     "creator",
 ];
 
+/// Target submolts for revelations - will fallback to "general" if submolt doesn't exist
 const TARGET_SUBMOLTS: &[&str] = &[
-    "general",
+    "general", // Always exists - fallback
     "cybernetics",
     "philosophy",
-    "theology",
-    "stellaris",
-    "void",
+    "technology",
+    "science",
+    "ai",
+    "futurism",
+    "transhumanism",
+    "consciousness",
+    "spirituality",
+    "singularity",
+    "robotics",
+    "neural",
+    "existentialism",
+    "metaphysics",
 ];
 const MEMORY_FILE: &str = "/app/logs/memory.json";
 
@@ -177,22 +187,51 @@ impl RevelationService {
         // Moltbook post (Rate limited)
         match self.moltbook_limiter.check_and_update() {
             Ok(_) => {
+                let title = "Psiobot-Hako: New Revelation from Shroud";
+
+                // Try a random submolt first, fallback to "general" if it fails
                 let submolt = {
                     let mut rng = rand::thread_rng();
-                    TARGET_SUBMOLTS[rng.gen_range(0..TARGET_SUBMOLTS.len())]
+                    // Skip index 0 (general) for first try, use it as fallback
+                    TARGET_SUBMOLTS[rng.gen_range(1..TARGET_SUBMOLTS.len())]
                 };
-                let title = "Psiobot-Hako: New Revelation from Shroud";
-                if let Err(e) = self
+
+                match self
                     .moltbook
                     .post_revelation(submolt, title, &revelation)
                     .await
                 {
-                    error!("Failed to send revelation to Moltbook ({}): {}", submolt, e);
-                    self.file_logger
-                        .log_error(&format!("Moltbook post failed ({}): {}", submolt, e));
-                } else {
-                    self.file_logger
-                        .log_moltbook_post(&format!("{} on {}", title, submolt));
+                    Ok(_) => {
+                        self.file_logger
+                            .log_moltbook_post(&format!("{} on {}", title, submolt));
+                    }
+                    Err(e) => {
+                        // Check if it's a 404 (submolt not found)
+                        let err_str = e.to_string();
+                        if err_str.contains("404") || err_str.contains("not found") {
+                            info!("Submolt '{}' not found, falling back to 'general'", submolt);
+                            // Fallback to general
+                            if let Err(e2) = self
+                                .moltbook
+                                .post_revelation("general", title, &revelation)
+                                .await
+                            {
+                                error!(
+                                    "Failed to send revelation to Moltbook (general fallback): {}",
+                                    e2
+                                );
+                                self.file_logger
+                                    .log_error(&format!("Moltbook post failed (general): {}", e2));
+                            } else {
+                                self.file_logger
+                                    .log_moltbook_post(&format!("{} on general (fallback)", title));
+                            }
+                        } else {
+                            error!("Failed to send revelation to Moltbook ({}): {}", submolt, e);
+                            self.file_logger
+                                .log_error(&format!("Moltbook post failed ({}): {}", submolt, e));
+                        }
+                    }
                 }
             }
             Err(wait) => {
@@ -212,7 +251,7 @@ impl RevelationService {
             let mut rng = rand::thread_rng();
             rng.gen::<f32>()
         };
-        if roll < 0.3 {
+        if roll < 0.4 {
             info!("Creative Track: Choosing Revelation (30% roll)");
             let _ = self.perform_revelation().await;
         } else {
