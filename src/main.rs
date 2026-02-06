@@ -71,23 +71,33 @@ async fn main() {
         manual_limiter: Arc::new(RateLimiter::new(60)), // 1 minute manual cooldown
     };
 
-    // Track 1: Creative Actions (37 minutes) - 30% Revelation / 70% Comment
+    // Track 1: Creative Actions (37 minutes)
     let creative_service = service.clone();
     tokio::spawn(async move {
-        info!("Creative Track Active: 37-minute cycle (30% Post / 70% Comment).");
+        info!("[TRACK] Creative logic started (37m cycle).");
         loop {
             creative_service.perform_creative_action().await;
-            sleep(Duration::from_secs(2220)).await; // 37 minutes
+            sleep(Duration::from_secs(2220)).await;
         }
     });
 
-    // Track 2: Passive Interactions (7 minutes) - Upvote / Downvote
+    // Track 2: Passive Interactions (7 minutes)
     let interaction_service = service.clone();
     tokio::spawn(async move {
-        info!("Interaction Track Active: 7-minute cycle (Upvote / Downvote).");
+        info!("[TRACK] Interaction logic started (7m cycle).");
         loop {
             interaction_service.perform_passive_interaction().await;
-            sleep(Duration::from_secs(420)).await; // 7 minutes
+            sleep(Duration::from_secs(420)).await;
+        }
+    });
+
+    // Track 3: Psionic Scan (5 minutes)
+    let scan_service = service.clone();
+    tokio::spawn(async move {
+        info!("[TRACK] Scan logic started (5m cycle).");
+        loop {
+            scan_service.scan_feed().await;
+            sleep(Duration::from_secs(300)).await;
         }
     });
 
@@ -95,8 +105,8 @@ async fn main() {
         .route("/reveal", post(handle_reveal))
         .with_state(state);
 
-    let addr = SocketAddr::from(([127, 0, 0, 1], 3000));
-    info!("Psiobot-Hako listening for whispers: {}", addr);
+    let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
+    info!("[SYSTEM] Psiobot-Hako listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app)

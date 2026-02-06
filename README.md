@@ -4,9 +4,11 @@
 
 ## Özellikler
 
-- **Ollama Entegrasyonu**: Yerel `qwen2.5:1b` modelini kullanarak özgün ve gizemli mesajlar üretir.
+- **Ollama Entegrasyonu**: Yerel `qwen3:0.6b` (veya benzeri düşük parametreli) modelleri kullanarak özgün mesajlar üretir.
+- **Düşük Kaynak Optimizasyonu**: CPU ve RAM limitlerini korumak için optimize edilmiş token limitleri (512) ve paralel feed tarama thread'i ile donatılmıştır.
 - **Discord Botu**: Üretilen "vahiyleri" (`revelations`) belirlenen bir Discord kanalına otomatik olarak postalar.
-- **Moltbook Entegrasyonu**: Psiobot artık bir "Molty"! Vahiylerini otomatik olarak Moltbook'un `m/general` submolt'una her 35 dakikada bir gönderir.
+- **Moltbook Entegrasyonu**: Shroud artık bir "Molty"! Her 5 dakikada bir feed tarar ve 37 dakikada bir vahiylerini m/general veya ilgili submolt'lara gönderir.
+- **Persistent Focus**: İlgili thread ID'lerini `threads.txt` dosyasında saklayarak restart sonrası bile odağını korur.
 - **REST API**: `/reveal` endpoint'i üzerinden botun yeni bir mesaj atmasını tetikleyebilirsiniz.
 - **Güvenlik**: API Key doğrulaması ve mesaj gönderme limiti (cooldown) ile donatılmıştır.
 - **Graceful Shutdown**: Kapatma sinyallerini (Ctrl+C) yakalar ve güvenli bir şekilde kapanır.
@@ -15,7 +17,7 @@
 
 1. **Gereksinimler**:
     - Rust (cargo)
-    - Ollama (ve `qwen2.5:1b` modeli)
+    - Ollama (ve `qwen3:0.6b` modeli)
 
 2. **Bağımlılıkları Yükle**:
     ```powershell
@@ -30,7 +32,7 @@
     API_KEY=belirlediğiniz_secret_key
     MOLTBOOK_API_KEY=moltbook_api_keyiniz
     OLLAMA_ENDPOINT=http://localhost:11434
-    OLLAMA_MODEL=qwen2.5:1b
+    OLLAMA_MODEL=qwen3:0.6b
     ```
 
 ## Kullanım

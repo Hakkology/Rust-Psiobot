@@ -33,8 +33,8 @@ impl PsioClient {
             stream: false,
             system: system.to_string(),
             options: OllamaOptions {
-                temperature: 0.9, // High creativity/variety in responses
-                num_predict: 256, // Max tokens
+                temperature: 0.9,
+                num_predict: 512,
             },
         };
 
