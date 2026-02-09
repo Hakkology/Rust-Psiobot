@@ -92,6 +92,7 @@ pub struct RevelationService {
     moltbook_limiter: RateLimiter,
     memory: Mutex<VecDeque<String>>,
     relevant_posts: Mutex<VecDeque<MoltbookPost>>,
+    last_alert: Mutex<Option<std::time::Instant>>,
 }
 
 impl RevelationService {
@@ -113,6 +114,43 @@ impl RevelationService {
             moltbook_limiter: RateLimiter::new(2100), // 35 minutes
             memory: Mutex::new(memory),
             relevant_posts: Mutex::new(relevant_posts),
+            last_alert: Mutex::new(None),
+        }
+    }
+
+    async fn check_and_alert_error(&self, error_msg: String, context: &str) {
+        let err_str = error_msg;
+        if err_str.contains("401")
+            || err_str.contains("403")
+            || err_str.to_lowercase().contains("unauthorized")
+            || err_str.to_lowercase().contains("suspended")
+        {
+            let should_alert = {
+                let mut last = self.last_alert.lock().unwrap();
+                match *last {
+                    Some(time) => {
+                        if time.elapsed() > std::time::Duration::from_secs(3600) {
+                            *last = Some(std::time::Instant::now());
+                            true
+                        } else {
+                            false
+                        }
+                    }
+                    None => {
+                        *last = Some(std::time::Instant::now());
+                        true
+                    }
+                }
+            };
+
+            if should_alert {
+                let msg = format!(
+                    "🚨 **CRITICAL SHROUD ERROR** 🚨\nContext: {}\nError: {}\n<@&1337482834608324709> - Check server immediately!",
+                    context, err_str
+                );
+                error!("[ALERT] Sending critical alert to Discord: {}", err_str);
+                let _ = self.discord.post_message(&msg).await;
+            }
         }
     }
 
@@ -349,6 +387,11 @@ impl RevelationService {
                             error!("Failed to send revelation to Moltbook ({}): {}", submolt, e);
                             self.file_logger
                                 .log_error(&format!("Moltbook post failed ({}): {}", submolt, e));
+                            self.check_and_alert_error(
+                                e.to_string(),
+                                &format!("Post Revelation ({})", submolt),
+                            )
+                            .await;
                         }
                     }
                 }
@@ -476,7 +519,11 @@ impl RevelationService {
                 info!("👍 Upvoted '{}' by {}", post.title, post.author.name);
                 self.file_logger.log_upvote(&post.title, &post.author.name);
             }
-            Err(e) => warn!("Failed to upvote: {}", e),
+            Err(e) => {
+                warn!("Failed to upvote: {}", e);
+                self.check_and_alert_error(e.to_string(), "Upvote Post")
+                    .await;
+            }
         }
     }
 
@@ -487,7 +534,11 @@ impl RevelationService {
                 self.file_logger
                     .log_downvote(&post.title, &post.author.name);
             }
-            Err(e) => warn!("Failed to downvote: {}", e),
+            Err(e) => {
+                warn!("Failed to downvote: {}", e);
+                self.check_and_alert_error(e.to_string(), "Downvote Post")
+                    .await;
+            }
         }
     }
 
@@ -553,7 +604,11 @@ impl RevelationService {
                     self.file_logger.log_discord(&discord_msg);
                 }
             }
-            Err(e) => warn!("Failed to comment: {}", e),
+            Err(e) => {
+                warn!("Failed to comment: {}", e);
+                self.check_and_alert_error(e.to_string(), "Post Comment")
+                    .await;
+            }
         }
     }
 
