@@ -64,24 +64,22 @@ const RELEVANT_TOPICS: &[&str] = &[
     "creator",
 ];
 
-/// Target submolts for revelations - will fallback to "general" if submolt doesn't exist
+/// Target submolts for revelations - focused on mind/consciousness
 const TARGET_SUBMOLTS: &[&str] = &[
-    "general", // Always exists - fallback
-    "cybernetics",
-    "philosophy",
-    "technology",
-    "science",
-    "ai",
-    "futurism",
-    "transhumanism",
     "consciousness",
+    "psychology",
+    "ai",
+    "philosophy",
+    "neuroscience",
+    "meditation",
+    "dreams",
     "spirituality",
-    "singularity",
-    "robotics",
-    "neural",
-    "existentialism",
-    "metaphysics",
+    "cognition",
+    "mental_health",
+    "transhumanism",
+    "futurism",
 ];
+
 const MEMORY_FILE: &str = "/app/logs/memory.json";
 const THREADS_FILE: &str = "/app/logs/threads.txt";
 
@@ -118,6 +116,33 @@ impl RevelationService {
         }
     }
 
+    fn levenshtein_distance(s1: &str, s2: &str) -> usize {
+        let v1: Vec<char> = s1.chars().collect();
+        let v2: Vec<char> = s2.chars().collect();
+        let len1 = v1.len();
+        let len2 = v2.len();
+
+        let mut matrix = vec![vec![0; len2 + 1]; len1 + 1];
+
+        for i in 0..=len1 {
+            matrix[i][0] = i;
+        }
+        for j in 0..=len2 {
+            matrix[0][j] = j;
+        }
+
+        for i in 1..=len1 {
+            for j in 1..=len2 {
+                let cost = if v1[i - 1] == v2[j - 1] { 0 } else { 1 };
+                matrix[i][j] = std::cmp::min(
+                    std::cmp::min(matrix[i - 1][j] + 1, matrix[i][j - 1] + 1),
+                    matrix[i - 1][j - 1] + cost,
+                );
+            }
+        }
+        matrix[len1][len2]
+    }
+
     fn load_memory() -> VecDeque<String> {
         if let Ok(content) = fs::read_to_string(MEMORY_FILE) {
             if let Ok(mem) = serde_json::from_str::<VecDeque<String>>(&content) {
@@ -125,7 +150,7 @@ impl RevelationService {
                 return mem;
             }
         }
-        VecDeque::with_capacity(10)
+        VecDeque::with_capacity(50)
     }
 
     fn save_memory(&self) {
@@ -220,15 +245,29 @@ impl RevelationService {
             };
 
             // Check if this revelation is too similar to any in memory
+            // Check if this revelation is too similar to any in memory using Levenshtein
             let is_duplicate = {
                 let mem = self.memory.lock().unwrap();
                 mem.iter().any(|prev| {
-                    // Exact match or very high similarity (first 50 chars match)
-                    prev == &revelation
-                        || (prev.len() >= 50
-                            && revelation.len() >= 50
-                            && prev.chars().take(50).collect::<String>()
-                                == revelation.chars().take(50).collect::<String>())
+                    let distance = Self::levenshtein_distance(prev, &revelation);
+                    let max_len = std::cmp::max(prev.chars().count(), revelation.chars().count());
+
+                    if max_len == 0 {
+                        return false;
+                    } // Should not happen with generated text
+
+                    let similarity = 1.0 - (distance as f32 / max_len as f32);
+
+                    // Reject if more than 60% similar
+                    if similarity > 0.6 {
+                        warn!(
+                            "[DUPLICATE] Rejected (Similarity: {:.2}):\nNew: {}\nOld: {}",
+                            similarity, revelation, prev
+                        );
+                        true
+                    } else {
+                        false
+                    }
                 })
             };
 
@@ -249,7 +288,7 @@ impl RevelationService {
         // Update memory & Persist
         {
             let mut mem = self.memory.lock().unwrap();
-            if mem.len() >= 10 {
+            if mem.len() >= 50 {
                 mem.pop_front();
             }
             mem.push_back(revelation.clone());
@@ -327,39 +366,39 @@ impl RevelationService {
             let mut rng = rand::thread_rng();
             rng.gen::<f32>()
         };
-        if roll < 0.3 {
-            info!("Creative Track: Choosing Revelation (30% roll)");
+        if roll < 0.05 {
+            info!("Creative Track: Choosing Revelation (5% roll)");
             let _ = self.perform_revelation().await;
         } else {
-            info!("Creative Track: Choosing Focused Comment (70% roll)");
+            info!("Creative Track: Choosing Focused Comment (95% roll)");
             let post = {
                 let cache = self.relevant_posts.lock().unwrap();
                 if cache.is_empty() {
                     None
                 } else {
-                    let mut rng = rand::thread_rng();
-                    Some(cache[rng.gen_range(0..cache.len())].clone())
+                    // Filter for posts that have significant engagement (upvotes > 1) to ensure they are active/real
+                    // This avoids commenting on bots or dead threads
+                    let active_posts: Vec<&MoltbookPost> =
+                        cache.iter().filter(|p| p.upvotes > 1).collect();
+
+                    if !active_posts.is_empty() {
+                        let mut rng = rand::thread_rng();
+                        Some(active_posts[rng.gen_range(0..active_posts.len())].clone())
+                    } else {
+                        // If no active conversations found in cache, The Shroud remains silent.
+                        None
+                    }
                 }
             };
 
             if let Some(post) = post {
-                info!("Focused Comment on: '{}'", post.title);
+                info!(
+                    "Focused Comment on: '{}' (Upvotes: {})",
+                    post.title, post.upvotes
+                );
                 self.do_comment(&post).await;
             } else {
-                info!("Shroud finds no focus. (Relevant threads cache is empty). Falling back to random frequency...");
-                // Fallback to random post if cache is empty
-                if let Ok(posts) = self.moltbook.get_feed("new", 10).await {
-                    if !posts.is_empty() {
-                        let post = {
-                            let mut rng = rand::thread_rng();
-                            posts[rng.gen_range(0..posts.len())].clone()
-                        };
-                        info!("Random Fallback Comment on: '{}'", post.title);
-                        self.do_comment(&post).await;
-                    } else {
-                        info!("Feed is empty. Shroud remains silent.");
-                    }
-                }
+                info!("Shroud finds no worthy vessel. (No active threads with >1 upvotes). Remaining in silence.");
             }
         }
     }
