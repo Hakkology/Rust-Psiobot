@@ -5,8 +5,8 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.fast
-    image: psiobot-hako
-    container_name: psiobot-hako
+    image: psiobot
+    container_name: psiobot
     restart: always
     env_file:
       - .env
@@ -18,7 +18,7 @@ services:
       - "host.docker.internal:host-gateway"
     labels:
       - "traefik.enable=true"
-      - "traefik.http.routers.psiobot.rule=Host(`${DOMAIN:-psiobot.fatalixsoft.com.tr}`)"
+      - "traefik.http.routers.psiobot.rule=Host(`${DOMAIN:-example.com}`)"
       - "traefik.http.routers.psiobot.entrypoints=websecure"
       - "traefik.http.routers.psiobot.tls.certresolver=le"
       - "traefik.http.services.psiobot.loadbalancer.server.port=3000"
