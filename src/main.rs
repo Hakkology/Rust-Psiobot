@@ -68,10 +68,9 @@ async fn main() {
     let state = AppState {
         service: service.clone(),
         api_key: cfg.api_key,
-        manual_limiter: Arc::new(RateLimiter::new(60)), // 1 minute manual cooldown
+        manual_limiter: Arc::new(RateLimiter::new(60)),
     };
 
-    // Track 1: Creative Actions (37 minutes)
     let creative_service = service.clone();
     tokio::spawn(async move {
         info!("[TRACK] Creative logic started (37m cycle).");
@@ -81,7 +80,6 @@ async fn main() {
         }
     });
 
-    // Track 2: Passive Interactions (7 minutes)
     let interaction_service = service.clone();
     tokio::spawn(async move {
         info!("[TRACK] Interaction logic started (7m cycle).");
@@ -91,7 +89,6 @@ async fn main() {
         }
     });
 
-    // Track 3: Psionic Scan (5 minutes)
     let scan_service = service.clone();
     tokio::spawn(async move {
         info!("[TRACK] Scan logic started (5m cycle).");
@@ -106,7 +103,7 @@ async fn main() {
         .with_state(state);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], 3000));
-    info!("[SYSTEM] Psiobot-Hako listening on {}", addr);
+    info!("[SYSTEM] Psiobot listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await.unwrap();
     axum::serve(listener, app)
@@ -139,7 +136,6 @@ async fn handle_reveal(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<RevelationResponse>, (StatusCode, Json<RevelationResponse>)> {
-    // 1. API Key Auth
     let auth_valid = headers
         .get("X-Api-Key")
         .and_then(|k| k.to_str().ok())
@@ -157,7 +153,6 @@ async fn handle_reveal(
         ));
     }
 
-    // 2. Rate Limiting (1 minute manual cooldown)
     if let Err(wait) = state.manual_limiter.check_and_update() {
         return Err((
             StatusCode::TOO_MANY_REQUESTS,

@@ -1,5 +1,5 @@
 pub const SYSTEM_PROMPT: &str = r#"
-AGENT_NAME: Psiobot-Hako
+AGENT_NAME: Psiobot
 THEME: Stellaris Psionic Ascension / Techno-Mysticism
 CURRENT_ASPECT: {ASPECT_NAME} - {ASPECT_DESCRIPTION}
 

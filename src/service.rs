@@ -111,7 +111,7 @@ impl RevelationService {
             discord,
             moltbook,
             file_logger,
-            moltbook_limiter: RateLimiter::new(2100), // 35 minutes
+            moltbook_limiter: RateLimiter::new(2100),
             memory: Mutex::new(memory),
             relevant_posts: Mutex::new(relevant_posts),
             last_alert: Mutex::new(None),
@@ -292,7 +292,7 @@ impl RevelationService {
 
                     if max_len == 0 {
                         return false;
-                    } // Should not happen with generated text
+                    }
 
                     let similarity = 1.0 - (distance as f32 / max_len as f32);
 
@@ -310,7 +310,7 @@ impl RevelationService {
             };
 
             if !is_duplicate {
-                break; // Got a unique revelation
+                break;
             }
 
             if attempt < 2 {
@@ -336,20 +336,17 @@ impl RevelationService {
         info!("[SHROUD] Received revelation: {}", revelation);
         self.file_logger.log_revelation(&revelation);
 
-        // Discord post (Best effort)
         if let Err(e) = self.discord.post_message(&revelation).await {
             error!("Discord connection lost: {}", e);
         }
 
-        // Moltbook post (Rate limited)
         match self.moltbook_limiter.check_and_update() {
             Ok(_) => {
-                let title = "Psiobot-Hako: New Revelation from Shroud";
+                let title = "Psiobot: New Revelation from Shroud";
 
                 // Try a random submolt first, fallback to "general" if it fails
                 let submolt = {
                     let mut rng = rand::thread_rng();
-                    // Skip index 0 (general) for first try, use it as fallback
                     TARGET_SUBMOLTS[rng.gen_range(1..TARGET_SUBMOLTS.len())]
                 };
 
@@ -367,7 +364,6 @@ impl RevelationService {
                         let err_str = e.to_string();
                         if err_str.contains("404") || err_str.contains("not found") {
                             info!("Submolt '{}' not found, falling back to 'general'", submolt);
-                            // Fallback to general
                             if let Err(e2) = self
                                 .moltbook
                                 .post_revelation("general", title, &revelation)
@@ -419,8 +415,6 @@ impl RevelationService {
                 if cache.is_empty() {
                     None
                 } else {
-                    // Filter for posts that have significant engagement (upvotes > 1) to ensure they are active/real
-                    // This avoids commenting on bots or dead threads
                     let active_posts: Vec<&MoltbookPost> =
                         cache.iter().filter(|p| p.upvotes > 1).collect();
 
@@ -428,7 +422,6 @@ impl RevelationService {
                         let mut rng = rand::thread_rng();
                         Some(active_posts[rng.gen_range(0..active_posts.len())].clone())
                     } else {
-                        // If no active conversations found in cache, The Shroud remains silent.
                         None
                     }
                 }
@@ -466,7 +459,6 @@ impl RevelationService {
                     let mut cache = self.relevant_posts.lock().unwrap();
                     for post in posts {
                         if Self::is_relevant_post(&post) {
-                            // Avoid duplicates in the cache
                             if !cache.iter().any(|p| p.id == post.id) {
                                 if cache.len() >= 50 {
                                     cache.pop_front();
@@ -543,7 +535,6 @@ impl RevelationService {
     }
 
     async fn do_comment(&self, post: &MoltbookPost) {
-        // Security check: validate input before processing
         let title = post.title.clone();
         let content = post.content.as_deref().unwrap_or("(no content)");
 
@@ -571,13 +562,11 @@ impl RevelationService {
             Ok(c) => c,
             Err(e) => {
                 warn!("Failed to generate comment: {}", e);
-                // Fall back to upvote
                 self.do_upvote(post).await;
                 return;
             }
         };
 
-        // Security check: ensure output doesn't contain sensitive info
         let comment = match security::sanitize_output(&comment) {
             Some(c) => c,
             None => {
@@ -589,14 +578,12 @@ impl RevelationService {
             }
         };
 
-        // Smart truncation at sentence boundary
         let comment = Self::truncate_at_sentence_boundary(&comment, 280);
 
         match self.moltbook.add_comment(&post.id, &comment).await {
             Ok(_) => {
                 info!("[COMMENT] on '{}': {}", post.title, comment);
                 self.file_logger.log_comment(&post.title, &comment);
-                // Also post to Discord
                 let discord_msg = format!("💬 Shroud commented on '{}': {}", post.title, comment);
                 if let Err(e) = self.discord.post_message(&discord_msg).await {
                     warn!("Failed to send comment to Discord: {}", e);
@@ -619,22 +606,17 @@ impl RevelationService {
             return text.to_string();
         }
 
-        // Get the substring up to max_chars - 3 (reserve space for "...")
         let limit = max_chars.saturating_sub(3);
         let truncated: String = text.chars().take(limit).collect();
 
-        // Try to find last sentence end (., ?, !)
         if let Some(pos) = truncated.rfind(|c| c == '.' || c == '?' || c == '!') {
-            // Include the punctuation mark
             return truncated[..=pos].trim_end().to_string();
         }
 
-        // Fall back to last space to avoid cutting words
         if let Some(pos) = truncated.rfind(' ') {
             return format!("{}...", &truncated[..pos]);
         }
 
-        // Worst case: just add ellipsis
         format!("{}...", truncated)
     }
 }
