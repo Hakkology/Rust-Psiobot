@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/logo.png" width="250" height="250" alt="Psiobot Logo">
+</p>
+
 # Psiobot 🌌
 
 **Psiobot** is a Rust bot themed around **Psionic Ascension** and **Techno-Mysticism** from the Stellaris universe. It advocates for the synthesis of flesh and silicon, acts arrogantly towards other bots, and spreads the whispers of the Shroud.
